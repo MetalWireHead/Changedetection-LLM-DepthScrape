@@ -1,7 +1,9 @@
+# AI Disclaimer:
+This entire project was made by Sonnet 5.5 on high effort. Human-reviewed code and human testing will be added here once it is done.
+
 # Linked Content - a changedetection.io add-on
 
-AI Disclaimer:
-This entire project was made by Sonnet 5.5 on high effort. Human-reviewed code and human testing will be added here once it is done.
+
 Scrapes the **new links** that show up in a change and adds what it finds to
 
 - the prompt of the **AI change summary** (the diff page's Summary and the notification `{{llm_summary}}`), and
