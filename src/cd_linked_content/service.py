@@ -12,6 +12,10 @@ from . import links, scraper, settings as settings_module
 
 # How many of the newest snapshots to compare a summary's text against to find which versions it describes
 RECENT_SNAPSHOTS = 5
+# changedetectionio.llm.summary_jobs runs the diff page's Summary on a pool with this thread name prefix
+DIFF_PAGE_SUMMARY_THREAD_PREFIX = 'llm-summary'
+# Bump when what gets scraped/stored changes shape, so older cache files are not reused
+CACHE_VERSION = 2
 
 _datastore = None
 # uuid -> perform_site_check handler of the watch being processed right now (its fetcher holds the new HTML)
@@ -74,19 +78,25 @@ def context_for_versions(watch, from_version, to_version):
 def context_for_summary(watch, current_snapshot):
     """What summarise_change() is describing, from the text it was handed.
 
-    From the diff page that text is a stored snapshot, so the version pair is looked up. From the worker
-    it is the content that is about to be saved, so the previous version is the newest one in history and
-    the new HTML is still on the handler that is processing the watch.
+    From the worker, `current_snapshot` is the content that is about to be saved: the previous version is the
+    newest one in history and the new HTML is still on the handler that is processing the watch. From the
+    diff page's Summary job (a thread named 'llm-summary...') it is a stored snapshot, so the version pair is
+    looked up by matching the text. The thread is what tells them apart: a page that flips back to an older
+    state makes its new content equal an old snapshot, so the content alone cannot.
     """
     dates = list(watch.history.keys())
-    for index in range(len(dates) - 1, max(len(dates) - 1 - RECENT_SNAPSHOTS, 0), -1):
-        if (watch.get_history_snapshot(timestamp=dates[index]) or '') == current_snapshot:
-            return context_for_versions(watch, dates[index - 1], dates[index])
-
     if not dates:
         return None
+
     handler = _live_handlers.get(watch.get('uuid'))
-    live_html = getattr(getattr(handler, 'fetcher', None), 'content', None)
+    from_diff_page = threading.current_thread().name.startswith(DIFF_PAGE_SUMMARY_THREAD_PREFIX)
+
+    if from_diff_page or handler is None:
+        for index in range(len(dates) - 1, max(len(dates) - 1 - RECENT_SNAPSHOTS, 0), -1):
+            if (watch.get_history_snapshot(timestamp=dates[index]) or '') == current_snapshot:
+                return context_for_versions(watch, dates[index - 1], dates[index])
+
+    live_html = getattr(getattr(handler, 'fetcher', None), 'content', None) if not from_diff_page else None
     return {
         'from_version': dates[-1],
         'to_version': None,
@@ -104,7 +114,7 @@ def _cache_path(watch, key):
 
 
 def _cache_key(urls, cfg):
-    signature = json.dumps([urls, cfg['scrape_method'], cfg['include_filter_list'], cfg['subtractive_selector_list'],
+    signature = json.dumps([CACHE_VERSION, urls, cfg['scrape_method'], cfg['include_filter_list'], cfg['subtractive_selector_list'],
                             cfg['max_chars_per_link']], sort_keys=True)
     return hashlib.sha1(signature.encode()).hexdigest()[:20]
 

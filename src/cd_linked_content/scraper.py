@@ -1,5 +1,6 @@
 """Fetch a linked page with changedetection.io's own fetchers and apply this add-on's own filters."""
 import asyncio
+import re
 import time
 
 from loguru import logger
@@ -66,6 +67,12 @@ def apply_filters(content, include_filters, subtractive_selectors, content_type=
     return '\n'.join(part for part in (text, text_parts) if part.strip())
 
 
+def tidy(text):
+    """Drop the layout indentation html_to_text leaves and collapse runs of blank lines (saves LLM tokens too)."""
+    text = '\n'.join(line.strip() for line in text.splitlines())
+    return re.sub(r'\n{3,}', '\n\n', text).strip()
+
+
 def scrape(url, settings):
     """Scrape one link. Blocking (call from a worker thread). Never raises, errors are returned."""
     result = {
@@ -80,8 +87,8 @@ def scrape(url, settings):
     try:
         content, status_code, content_type = asyncio.run(_fetch(settings['scrape_method'], url, settings['timeout']))
         result['status_code'] = status_code
-        text = apply_filters(content, settings['include_filter_list'], settings['subtractive_selector_list'],
-                             content_type).strip()
+        text = tidy(apply_filters(content, settings['include_filter_list'], settings['subtractive_selector_list'],
+                                  content_type))
         if not text:
             result['error'] = ('The include filters matched nothing on this page' if settings['include_filter_list']
                                else 'The page had no text content')

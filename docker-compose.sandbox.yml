@@ -10,6 +10,8 @@ services:
       - NO_PROXY=localhost,127.0.0.1,browser-selenium-chrome
       - REQUESTS_CA_BUNDLE=/ca-bundle.crt
       - SSL_CERT_FILE=/ca-bundle.crt
+      # Lets the AI settings point at a mock LLM server on the host (the app blocks private addresses otherwise)
+      - ALLOW_IANA_RESTRICTED_ADDRESSES=true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

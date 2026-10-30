@@ -34,3 +34,7 @@ def test_json_and_jq_include_filters():
 
 def test_filter_matching_nothing_is_empty():
     assert scraper.apply_filters(HTML, ['#nope'], []).strip() == ''
+
+
+def test_tidy_removes_indentation_and_blank_runs():
+    assert scraper.tidy('   a  \n\n\n\n      b\n  ') == 'a\n\nb'
