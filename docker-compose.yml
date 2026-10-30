@@ -5,10 +5,13 @@ services:
       hostname: changedetection
       volumes:
         - changedetection-data:/datastore
+        # The Linked Content add-on, installed (editable) by docker-entrypoint.sh through EXTRA_PACKAGES below
+        - ./:/addon
 # Configurable proxy list support, see https://github.com/dgtlmoon/changedetection.io/wiki/Proxy-configuration#proxy-list-support
 #        - ./proxies.json:/datastore/proxies.json
 
       environment:
+      - EXTRA_PACKAGES=--no-build-isolation -e /addon
   #        Default listening port, can also be changed with the -p option (not to be confused with ports: below)
   #      - PORT=5000
   #
