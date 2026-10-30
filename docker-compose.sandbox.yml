@@ -1,0 +1,10 @@
+# Test-environment-only override: the Claude Code sandbox re-signs outbound HTTPS with its own CA,
+# so containers must trust it. Not needed on a normal machine.
+#   docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
+services:
+  changedetection:
+    environment:
+      - REQUESTS_CA_BUNDLE=/ca-bundle.crt
+      - SSL_CERT_FILE=/ca-bundle.crt
+    volumes:
+      - /root/.ccr/ca-bundle.crt:/ca-bundle.crt:ro
