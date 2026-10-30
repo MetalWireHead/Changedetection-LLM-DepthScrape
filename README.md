@@ -59,9 +59,3 @@ Settings are saved by changedetection.io in `<datastore>/linked_content.json`. T
 ```bash
 docker exec -w /app changedetection python -m pytest /addon/tests -q -p no:cacheprovider --rootdir=/addon
 ```
-
-## Running this in the Claude Code sandbox
-
-The sandbox has no direct internet and re-signs TLS, so the test containers need three extras that a normal machine
-does not: `docker-compose.sandbox.yml`, `scripts/sandbox-proxy-forward.py` (containers -> the sandbox's egress proxy) and
-`scripts/sandbox-trust-ca.sh` (Chrome trusts the sandbox CAs). Nothing here turns certificate checking off.

@@ -2,3 +2,7 @@ __pycache__/
 *.egg-info/
 build/
 .pytest_cache/
+
+# Local test-environment files, not part of the add-on
+docker-compose.sandbox.yml
+scripts/
