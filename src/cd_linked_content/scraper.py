@@ -5,6 +5,8 @@ import time
 
 from loguru import logger
 
+from . import links
+
 JSON_FILTER_PREFIXES = ('json:', 'jq:', 'jqraw:')
 
 
@@ -37,17 +39,18 @@ async def _fetch(method, url, timeout):
             logger.debug(f"linked_content: fetcher quit failed for {url}: {e}")
 
 
-def apply_filters(content, include_filters, subtractive_selectors, content_type=''):
-    """Linked-page filters -> plain text. Same rule syntax as the watch filters of changedetection.io."""
+def remove_elements(content, subtractive_selectors):
     from changedetectionio import html_tools
 
-    if subtractive_selectors:
-        content = html_tools.element_removal(subtractive_selectors, content)
+    return html_tools.element_removal(subtractive_selectors, content) if subtractive_selectors else content
+
+
+def to_text(content, include_filters, content_type=''):
+    """Include filters, then plain text. Same rule syntax as the watch filters of changedetection.io."""
+    from changedetectionio import html_tools
 
     if not include_filters:
-        if 'json' in content_type.lower():
-            return content
-        return html_tools.html_to_text(content)
+        return content if 'json' in content_type.lower() else html_tools.html_to_text(content)
 
     html_parts, text_parts = '', ''
     for rule in include_filters:
@@ -67,19 +70,29 @@ def apply_filters(content, include_filters, subtractive_selectors, content_type=
     return '\n'.join(part for part in (text, text_parts) if part.strip())
 
 
+def apply_filters(content, include_filters, subtractive_selectors, content_type=''):
+    """Linked-page filters -> plain text: remove elements first, then the include filters."""
+    return to_text(remove_elements(content, subtractive_selectors), include_filters, content_type)
+
+
 def tidy(text):
     """Drop the layout indentation html_to_text leaves and collapse runs of blank lines (saves LLM tokens too)."""
     text = '\n'.join(line.strip() for line in text.splitlines())
     return re.sub(r'\n{3,}', '\n\n', text).strip()
 
 
-def scrape(url, settings):
-    """Scrape one link. Blocking (call from a worker thread). Never raises, errors are returned."""
+def scrape(url, settings, want_links=False):
+    """Scrape one link. Blocking (call from a worker thread). Never raises, errors are returned.
+
+    With `want_links` the result also has the links found in the page, taken after the 'remove elements' rules ran
+    (so removing a menu or footer also removes its links) but before the include filters.
+    """
     result = {
         'url': url,
         'method': settings['scrape_method'],
         'status_code': None,
         'text': '',
+        'links': [],
         'error': None,
         'truncated': False,
         'fetched_at': int(time.time()),
@@ -87,8 +100,10 @@ def scrape(url, settings):
     try:
         content, status_code, content_type = asyncio.run(_fetch(settings['scrape_method'], url, settings['timeout']))
         result['status_code'] = status_code
-        text = tidy(apply_filters(content, settings['include_filter_list'], settings['subtractive_selector_list'],
-                                  content_type))
+        content = remove_elements(content, settings['subtractive_selector_list'])
+        if want_links and 'json' not in content_type.lower():
+            result['links'] = links.links_in_html(content, url)
+        text = tidy(to_text(content, settings['include_filter_list'], content_type))
         if not text:
             result['error'] = ('The include filters matched nothing on this page' if settings['include_filter_list']
                                else 'The page had no text content')

@@ -30,11 +30,12 @@ def apply():
         def summarise_change(watch, datastore, diff, current_snapshot=''):
             _local.block = ''
             try:
-                cfg = service.load_settings(datastore)
-                # Nothing to add to when AI is not configured, don't scrape for no one
-                if cfg['enabled'] and diff.strip() and evaluator._runtime_llm_config(datastore):
+                cfg = service.settings_for(watch, datastore)
+                # Nothing to add to when AI is not configured or linked content is not sent to it, so don't scrape for no one
+                if cfg['enabled'] and cfg['send_to_llm'] and diff.strip() and evaluator._runtime_llm_config(datastore):
                     ctx = service.context_for_summary(watch, current_snapshot)
-                    _local.block = service.prompt_block(service.linked_content(watch, ctx, cfg))
+                    payload = service.linked_content(watch, ctx, cfg, allow_scrape=bool(ctx) and service.may_scrape_now(watch, ctx))
+                    _local.block = service.prompt_block(payload, cfg)
             except Exception as e:
                 logger.warning(f"linked_content: continuing without linked content in the AI prompt: {e}")
             try:

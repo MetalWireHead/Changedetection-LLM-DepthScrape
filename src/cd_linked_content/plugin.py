@@ -39,7 +39,10 @@ def update_handler_alter(update_handler, watch, datastore):
 
 @hookimpl
 def update_finalize(update_handler, watch, datastore, processing_exception):
-    service.forget_handler(watch)
+    entry = service.forget_handler(watch)
+    if watch is not None and processing_exception is None:
+        service.set_datastore(datastore)
+        service.after_check(watch, datastore, entry)
 
 
 @hookimpl

@@ -111,9 +111,19 @@ def new_links(link_source, base_url, old_text, new_text, old_html, new_html):
     return _unique(found)
 
 
+def current_links(link_source, base_url, new_text, new_html):
+    """Every link on the page now, new or not, from the same places new_links() looks in."""
+    found = []
+    if link_source in ('text', 'both'):
+        found += links_in_text(new_text, base_url)
+    if link_source in ('html', 'both') and new_html:
+        found += links_in_html(new_html, base_url)
+    return _unique(found)
+
+
 def filter_links(urls, watch_url, same_domain_only=True, include_regex='', exclude_regex='', limit=10):
-    include = _compile(include_regex)
-    exclude = _compile(exclude_regex)
+    include = compile_regex(include_regex)
+    exclude = compile_regex(exclude_regex)
     watch_host = _host(watch_url)
     watch_url_normalised = normalise(watch_url)
     kept = []
@@ -130,7 +140,7 @@ def filter_links(urls, watch_url, same_domain_only=True, include_regex='', exclu
     return kept[:limit]
 
 
-def _compile(pattern):
+def compile_regex(pattern):
     if not pattern or not pattern.strip():
         return None
     try:

@@ -84,35 +84,64 @@ Run `pip install .` from the clone, in the same Python environment changedetecti
 `docker-compose.yml` in this repo is upstream's, with the Selenium Chrome service and its `/dev/shm` volume switched on, and
 upstream's `CHROME_OPTIONS` lines commented out because their indentation is invalid YAML.
 
-## Settings (Settings > Linked Content)
+## Settings
+
+### Global: Settings > Linked Content
+
+Saved by changedetection.io in `<datastore>/linked_content.json`; they apply to every watch.
 
 | Setting | |
 |---|---|
 | Look for new links in | **Text**: URLs written in the lines the change added. **HTML**: `href`, `data-href`, `data-url`, `formaction` and `onclick` targets in the fetched HTML, so links behind buttons are found. **Both**. |
 | Scrape new links using | **Plain text**: changedetection.io's requests fetcher (no JavaScript). **Chrome**: the instance's browser fetcher (`WEBDRIVER_URL` / `PLAYWRIGHT_DRIVER_URL`), needed for JavaScript sites. |
-| Include filters | One per line, same syntax as a watch: CSS selector, `xpath:`, `xpath1:`, `json:`, `jq:`, `jqraw:`. |
-| Remove elements | One per line: CSS selector or `xpath:`. Applied before the include filters, like the watch setting. |
-| Same domain / include regex / exclude regex | Which of the new links to follow. |
-| Max links, max characters per link, timeout | Limits. |
+| Same domain only | Only follow links on the watch's domain. |
+| Max links, max characters per link, timeout | Limits. Max links counts every depth together. |
+| Link depth | `0` = only the new links. `1` = also the links found inside those pages. `2` = one level further, and so on (0-5). Default for all watches. |
+| Save the content of linked pages | Keeps a history of every linked page. The AI summary then only gets what changed in a page since its previous scrape. Default for all watches. |
+| Send linked content to the AI | On/off for the AI change summary. Scraping, the tab and the history work either way. |
+| Only send pages matching this regex to the AI | Optional. Empty = every linked page. |
 
-Settings are saved by changedetection.io in `<datastore>/linked_content.json`. They apply to every watch.
+### Per watch: the "Linked Content" tab of the watch's edit page
+
+Saved with the watch's normal **Save** button, in `<datastore>/<watch uuid>/linked_content.json`.
+
+| Setting | |
+|---|---|
+| Only follow links matching this regex | Empty = every new link (the same-domain rule still applies). |
+| Never follow links matching this regex | Wins over the other two regexes. |
+| Always scrape links matching this regex | Links on the page that match are scraped after every check, even when they are not new. Not limited by "only follow"; same-domain and "never follow" still apply. |
+| Include filters / Remove elements | For the linked pages. One per line. Include: CSS selector, `xpath:`, `xpath1:`, `json:`, `jq:`, `jqraw:`. Remove: CSS selector or `xpath:`, applied first; links inside removed elements are not followed either. |
+| Save a history / Link depth | Override the global defaults for this watch. |
 
 ## How it works
 
 - A link is *new* when it is in the new HTML but not in the previous fetch's HTML (HTML), or in an added line (text).
   changedetection.io keeps the raw HTML of the newest two fetches only. Without the earlier HTML, HTML mode only
   counts links that are also named in an added line, so a whole page is never treated as new.
-- Each link is fetched with changedetection.io's own fetcher classes. The result is cached per watch in
-  `<datastore>/<watch uuid>/linked-content/`, so the tab and the summary never scrape the same links twice.
-- **No hook exists for the summary prompt or the diff page tabs**, so the add-on wraps
-  `changedetectionio.llm.evaluator.summarise_change` / `build_change_summary_prompt` once at runtime, and the tab is added
-  by a script injected through `get_html_head_extras` that reads a small `/linked-content/<uuid>` endpoint the add-on
-  registers. These are the parts most likely to need an update when changedetection.io changes internally.
+- After every detected change a background job scrapes the new links (and, after every check, the "always scrape"
+  links), so the tab and the history are ready without anyone opening the page. The first check of a watch the add-on
+  has not seen before only records its version.
+- Each link is fetched with changedetection.io's own fetcher classes. With a depth above 0, the links found in a
+  scraped page (after the "remove elements" rules) are followed the same way, breadth first, within the max-links cap.
+  Results are cached per watch in `<datastore>/<watch uuid>/linked-content/cache/`, one entry per change.
+- With a history, every scraped page is saved under `<datastore>/<watch uuid>/linked-content/history/` whenever it
+  differs from its last saved version. The AI gets the diff of each page (all of it the first time, nothing when
+  unchanged) and the Linked Content tab shows what changed.
+- **No hook exists for the summary prompt, the diff page tabs, or per-watch settings**, so the add-on wraps
+  `changedetectionio.llm.evaluator.summarise_change` / `build_change_summary_prompt` once at runtime, adds both tabs with
+  scripts injected through `get_html_head_extras`, registers a small `/linked-content/<uuid>` endpoint for the diff tab,
+  and wraps the watch edit view to save the per-watch tab. These are the parts most likely to need an update when
+  changedetection.io changes internally.
 
 ## Limits
 
 - Not appended to the raw `{{diff}}` of a notification, only to the AI summary (and the tab).
 - A summary that is already cached for a pair of versions is not regenerated when you change these settings.
+- An old version of the page is never scraped "now" (that would show today's links, not the old ones): its Linked Content
+  tab only shows what was saved when that change happened.
+- A linked page that changes while the watched page does not is scraped (when it matches "always scrape") and saved, but
+  nothing is sent to the AI, because the AI summary only runs for changes of the watched page.
+- Every link scraped costs time and, with Chrome, memory: keep max links and depth low.
 - The AI "every change between versions" mode uses the newest change for finding links.
 - Scraped page text is sent to your LLM provider, like the diff is.
 
