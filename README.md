@@ -13,18 +13,76 @@ Built and tested against the `ghcr.io/dgtlmoon/changedetection.io` image, v0.60.
 
 ## Install
 
-Docker: the add-on is a normal pip package, changedetection.io installs it from `EXTRA_PACKAGES` on every start.
-`docker-compose.yml` in this repo mounts the folder at `/addon` and sets
+The add-on is a normal Python package. changedetection.io's Docker image installs anything listed in its
+`EXTRA_PACKAGES` environment variable every time the container starts, so installing means: get this repo onto your
+machine, mount it into the container, and point `EXTRA_PACKAGES` at the mounted folder.
 
-```yaml
-environment:
-  - EXTRA_PACKAGES=--no-build-isolation -e /addon
-```
+### Option A - use this repo's `docker-compose.yml` (simplest)
 
-Without Docker: `pip install .` into the environment changedetection.io runs in, then restart it.
+It runs changedetection.io plus a Selenium Chrome browser (needed for the "Chrome" scrape option) with the add-on
+already wired in.
 
-`docker-compose.yml` is upstream's, with the Selenium Chrome service and its `/dev/shm` volume switched on (needed for the
-"Chrome" scrape option), and upstream's `CHROME_OPTIONS` lines commented out because their indentation is invalid YAML.
+1. Install Docker with Compose v2 (`docker compose version` should work).
+2. Clone the repo and enter it:
+   ```bash
+   git clone https://github.com/MetalWireHead/Changedetection-LLM-DepthScrape.git
+   cd Changedetection-LLM-DepthScrape
+   ```
+3. If the add-on is not on the default branch yet, switch to the branch that has it:
+   ```bash
+   git checkout claude/eager-planck-2cu9ux
+   ```
+4. Start it:
+   ```bash
+   docker compose up -d
+   ```
+   The compose file mounts the cloned folder (`./`) at `/addon` inside the container and sets
+   `EXTRA_PACKAGES=--no-build-isolation -e /addon`, so the container installs the add-on from your clone on startup.
+5. Check that it installed:
+   ```bash
+   docker compose logs changedetection | grep -i "linked"
+   ```
+   You should see `Successfully installed changedetection-linked-content`.
+6. Open http://127.0.0.1:5000, go to **Settings > Linked Content** and choose your options. Save.
+
+### Option B - add it to a compose file you already have
+
+1. Clone the repo anywhere on the machine that runs Docker:
+   ```bash
+   git clone https://github.com/MetalWireHead/Changedetection-LLM-DepthScrape.git
+   ```
+2. In your compose file, on the changedetection.io service, add a volume pointing at your clone and the environment
+   variable (the path on the left is where you cloned it, absolute or relative to the compose file):
+   ```yaml
+   services:
+     changedetection:
+       volumes:
+         - changedetection-data:/datastore
+         - ./Changedetection-LLM-DepthScrape:/addon      # your clone -> /addon in the container
+       environment:
+         - EXTRA_PACKAGES=--no-build-isolation -e /addon
+   ```
+   Mount it read-write (no `:ro`): the install writes package metadata into the folder.
+3. For the "Chrome" scrape option the instance needs a browser: keep or enable the browser service from upstream's
+   compose file and its `WEBDRIVER_URL` (or `PLAYWRIGHT_DRIVER_URL`) setting. Without one, only the plain-text option works.
+4. Recreate the container so it picks up the changes:
+   ```bash
+   docker compose up -d
+   ```
+5. Check the logs and open **Settings > Linked Content**, as in Option A, steps 5 and 6.
+
+### Updating and removing
+
+- Update: `git pull` in your clone, then `docker compose restart changedetection`.
+- Remove: delete the `/addon` volume line and the `EXTRA_PACKAGES` line, then `docker compose up -d`. Saved settings stay
+  in the datastore as `linked_content.json` and are harmless.
+
+### Without Docker
+
+Run `pip install .` from the clone, in the same Python environment changedetection.io runs in, then restart it.
+
+`docker-compose.yml` in this repo is upstream's, with the Selenium Chrome service and its `/dev/shm` volume switched on, and
+upstream's `CHROME_OPTIONS` lines commented out because their indentation is invalid YAML.
 
 ## Settings (Settings > Linked Content)
 
