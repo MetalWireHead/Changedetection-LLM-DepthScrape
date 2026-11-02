@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "changedetection-linked-content"
+version = "0.1.0"
+description = "changedetection.io add-on: scrape new links found in a diff and add them to the AI summary prompt and a 'Linked Content' diff tab"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = []
+
+[project.entry-points.changedetectionio]
+linked_content = "cd_linked_content.plugin"
+
+[tool.setuptools.packages.find]
+where = ["src"]
