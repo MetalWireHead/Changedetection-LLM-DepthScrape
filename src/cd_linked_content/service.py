@@ -387,11 +387,12 @@ def prompt_block(payload, cfg):
 
 
 def _diff_html(diff):
+    """One block-level span per line (so no newlines between them), empty lines kept visible."""
     lines = []
     for line in diff.splitlines():
         css = 'linked-content-added' if line.startswith('+') else 'linked-content-removed' if line.startswith('-') else ''
-        lines.append(f'<span class="{css}">{escape(line)}</span>')
-    return Markup('\n'.join(lines))
+        lines.append(f'<span class="{css}">{escape(line) or Markup("&nbsp;")}</span>')
+    return Markup(''.join(lines))
 
 
 def tab_html(payload, cfg):

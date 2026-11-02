@@ -25,8 +25,9 @@ _registered = False
 STYLE = """<style>
 .linked-content-item summary { margin: .6em 0; }
 .linked-content-text, .linked-content-diff { white-space: pre-wrap; }
-.linked-content-added { background: rgba(60, 170, 80, .22); display: block; }
-.linked-content-removed { background: rgba(220, 70, 70, .22); display: block; }
+.linked-content-diff span { display: block; }
+.linked-content-added { background: rgba(60, 170, 80, .22); }
+.linked-content-removed { background: rgba(220, 70, 70, .22); }
 #linked-content-settings .pure-form-message-inline { display: block; opacity: .75; margin: .2em 0 .8em; }
 </style>"""
 
