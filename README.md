@@ -113,6 +113,23 @@ Saved with the watch's normal **Save** button, in `<datastore>/<watch uuid>/link
 | Include filters / Remove elements | For the linked pages. One per line. Include: CSS selector, `xpath:`, `xpath1:`, `json:`, `jq:`, `jqraw:`. Remove: CSS selector or `xpath:`, applied first; links inside removed elements are not followed either. |
 | Save a history / Link depth | Override the global defaults for this watch. |
 
+#### Testing the settings: two buttons at the top of the tab
+
+Both work on the settings as they are in the form right now, saved or not, and show their results in a panel to the right
+of the form (the same layout as changedetection.io's own *Activate preview*).
+
+- **Test link rules** fetches the watch's page again, the way a real check does (the watch's own fetcher, headers,
+  proxy and browser steps), and lists every link on it, colour-coded: green *will be scraped*, blue *always scraped*,
+  red *not scraped* with the reason (another domain, does not match "only follow", matches "never follow", over the
+  maximum links...). Every link is treated as if it were new. With a link depth above 0 it also scrapes the pages
+  that would be scraped (at most the maximum links) so you see the links one level further down, indented under the page
+  they were found on.
+- **Activate preview** lists the links that would be scraped and shows the page of the one you pick, after and before the
+  include filters ("remove elements" is applied to both), using the scrape method from the global settings. It
+  refreshes by itself when you edit the include filters or remove elements, and shows the error when a filter is invalid
+  or matches nothing. Run *Test link rules* again after changing a regex or the depth.
+
+
 ## How it works
 
 - A link is *new* when it is in the new HTML but not in the previous fetch's HTML (HTML), or in an added line (text).
@@ -121,6 +138,8 @@ Saved with the watch's normal **Save** button, in `<datastore>/<watch uuid>/link
 - After every detected change a background job scrapes the new links (and, after every check, the "always scrape"
   links), so the tab and the history are ready without anyone opening the page. The first check of a watch the add-on
   has not seen before only records its version.
+- Every linked page is checked with changedetection.io's own fetch URL gate first, so links to private or internal
+  addresses, `file://` and the like are refused (unless the instance allows them with `ALLOW_IANA_RESTRICTED_ADDRESSES`).
 - Each link is fetched with changedetection.io's own fetcher classes. With a depth above 0, the links found in a
   scraped page (after the "remove elements" rules) are followed the same way, breadth first, within the max-links cap.
   Results are cached per watch in `<datastore>/<watch uuid>/linked-content/cache/`, one entry per change.
@@ -141,7 +160,9 @@ Saved with the watch's normal **Save** button, in `<datastore>/<watch uuid>/link
   tab only shows what was saved when that change happened.
 - A linked page that changes while the watched page does not is scraped (when it matches "always scrape") and saved, but
   nothing is sent to the AI, because the AI summary only runs for changes of the watched page.
-- Every link scraped costs time and, with Chrome, memory: keep max links and depth low.
+- Every link scraped costs time and, with Chrome, memory: keep max links and depth low. The add-on is on for **every**
+  watch (after each detected change it scrapes up to the maximum links). The only on/off switch is the global one under
+  Settings > Linked Content; to keep a single watch out, give it a "never follow" regex of `.` (that matches every link).
 - The AI "every change between versions" mode uses the newest change for finding links.
 - Scraped page text is sent to your LLM provider, like the diff is.
 

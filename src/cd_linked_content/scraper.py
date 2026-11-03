@@ -8,11 +8,17 @@ from loguru import logger
 from . import links
 
 JSON_FILTER_PREFIXES = ('json:', 'jq:', 'jqraw:')
+PREVIEW_UNFILTERED_CHARS = 100_000
 
 
 async def _fetch(method, url, timeout):
     """(content, status_code, content_type) from the requests fetcher or the Chrome (webdriver) fetcher."""
     from changedetectionio import content_fetchers
+    from changedetectionio.validate_url import validate_fetch_url_async
+
+    # The same gate the app puts in front of every fetch it makes (private/internal addresses, file://, ...), since
+    # links come from other people's pages
+    await validate_fetch_url_async(url)
 
     fetcher_class = content_fetchers.html_webdriver if method == 'webdriver' else content_fetchers.html_requests
     fetcher = fetcher_class()
@@ -81,11 +87,12 @@ def tidy(text):
     return re.sub(r'\n{3,}', '\n\n', text).strip()
 
 
-def scrape(url, settings, want_links=False):
+def scrape(url, settings, want_links=False, preview=False):
     """Scrape one link. Blocking (call from a worker thread). Never raises, errors are returned.
 
     With `want_links` the result also has the links found in the page, taken after the 'remove elements' rules ran
-    (so removing a menu or footer also removes its links) but before the include filters.
+    (so removing a menu or footer also removes its links) but before the include filters. With `preview` it also has
+    'unfiltered': the page text before the include filters (after 'remove elements'), for the filter preview.
     """
     result = {
         'url': url,
@@ -103,6 +110,8 @@ def scrape(url, settings, want_links=False):
         content = remove_elements(content, settings['subtractive_selector_list'])
         if want_links and 'json' not in content_type.lower():
             result['links'] = links.links_in_html(content, url)
+        if preview:
+            result['unfiltered'] = tidy(to_text(content, [], content_type))[:PREVIEW_UNFILTERED_CHARS]
         text = tidy(to_text(content, settings['include_filter_list'], content_type))
         if not text:
             result['error'] = ('The include filters matched nothing on this page' if settings['include_filter_list']

@@ -1,4 +1,5 @@
 """Glue: which links to scrape for a change, scraping them (cached, optionally with a history), and rendering the result."""
+import asyncio
 import hashlib
 import json
 import os
@@ -157,21 +158,20 @@ def seeds_for(watch, ctx, cfg):
     always = []
     always_regex = links.compile_regex(cfg['always_scrape_regex'])
     if always_regex:
-        # The always-scrape regex is its own selector, so the 'only follow' regex is not applied to it
-        matching = [u for u in links.current_links(cfg['link_source'], base, ctx['new_text'], ctx['new_html'])
-                    if always_regex.search(u)]
-        always = [u for u in links.filter_links(matching, base, same_domain_only=same_domain,
-                                                exclude_regex=cfg['link_exclude_regex'], limit=cfg['max_links'])
-                  if u not in new]
+        exclude = links.compile_regex(cfg['link_exclude_regex'])
+        for url in links.current_links(cfg['link_source'], base, ctx['new_text'], ctx['new_html']):
+            if url not in new and links.decide(url, base, same_domain, None, exclude, always_regex)[0] == 'always':
+                always.append(url)
+        always = always[:cfg['max_links']]
 
     return ([(u, 'new') for u in new] + [(u, 'always') for u in always])[:cfg['max_links']], len(found_new)
 
 
-def crawl(watch, seeds, cfg):
+def crawl(watch, seeds, cfg, keep_links=False):
     """Scrape the seeds, then the links found in the scraped pages down to cfg['link_depth'], breadth first.
 
     `max_links` caps all depths together. Deeper links follow the same rules as new ones: same domain, 'only follow'
-    and 'never follow' regexes.
+    and 'never follow' regexes. With `keep_links` every result keeps the links found in its page (the link test shows them).
     """
     base = watch.get('url', '')
     seen = {url for url, _ in seeds}
@@ -183,6 +183,8 @@ def crawl(watch, seeds, cfg):
         result = scraper.scrape(url, cfg, want_links=deeper)
         found_links = result.pop('links', [])
         result.update(depth=depth, parent=parent, kind=kind)
+        if keep_links:
+            result['links'] = found_links
         results.append(result)
         if deeper and not result['error']:
             for child in links.filter_links(found_links, base, same_domain_only=cfg['same_domain_only'],
@@ -343,6 +345,109 @@ def _after_check_job(watch, datastore, live_html):
         return
 
     linked_content(watch, ctx, cfg, allow_scrape=True, max_age=FRESH_SECONDS)
+
+
+# --- the two tests on the watch's Linked Content tab -----------------------------------------------
+
+def fetch_watch_page(watch, datastore):
+    """(html, fetcher name) of the watch's page, fetched the way a real check does it: the watch's own fetcher,
+    headers, proxy, JavaScript and browser steps. Blocking."""
+    async def run():
+        from changedetectionio.processors import get_processor_module
+
+        handler = get_processor_module(watch.get('processor') or 'text_json_diff').perform_site_check(
+            datastore=datastore, watch_uuid=watch['uuid'])
+        try:
+            await handler.call_browser()
+            content = handler.fetcher.content
+            if not isinstance(content, str):
+                raise ValueError('The watch did not return a text page, so there are no links to look at')
+            return content, getattr(handler.fetcher, 'backend_name', None)
+        finally:
+            fetcher = getattr(handler, 'fetcher', None)
+            if fetcher is not None:
+                try:
+                    await fetcher.quit()
+                except Exception as e:
+                    logger.debug(f"linked_content: fetcher quit failed after the link test: {e}")
+                fetcher.clear_content()
+
+    return asyncio.run(run())
+
+
+def _cfg_from_form(datastore, values):
+    """(settings, None) from the unsaved form values of the watch tab, or (None, error text) for a bad regex."""
+    values = settings_module.clean_watch(values)
+    bad = settings_module.invalid_regexes(values)
+    if bad:
+        return None, 'Not a valid regular expression: ' + ', '.join(bad)
+    return settings_module.effective(load_settings(datastore), values), None
+
+
+def run_link_test(watch, datastore, values):
+    """'Test link rules': fetch the watch's page again and show what the rules in `values` (the unsaved form) do to
+    each link on it. Every link counts as if it were new. With a depth above 0 the pages that would be scraped are
+    really scraped (at most max_links of them) to find the links one level further down.
+    """
+    cfg, error = _cfg_from_form(datastore, values)
+    if error:
+        return {'error': error}
+
+    html, backend = fetch_watch_page(watch, datastore)
+    text = ''
+    if cfg['link_source'] in ('text', 'both'):
+        from changedetectionio import html_tools
+        text = html_tools.html_to_text(html)
+    base = watch.get('url', '')
+    include = links.compile_regex(cfg['link_include_regex'])
+    exclude = links.compile_regex(cfg['link_exclude_regex'])
+    always = links.compile_regex(cfg['always_scrape_regex'])
+
+    rows, selected = [], []
+    page_links = links.current_links(cfg['link_source'], base, text, html)
+    for url in page_links:
+        kind, reason = links.decide(url, base, cfg['same_domain_only'], include, exclude, always)
+        if kind != 'skip':
+            if len(selected) >= cfg['max_links']:
+                kind, reason = 'skip', f"over the max links limit ({cfg['max_links']})"
+            else:
+                selected.append((url, kind))
+        rows.append({'url': url, 'kind': kind, 'reason': reason, 'depth': 0, 'parent': None})
+
+    errors = []
+    scraped = 0
+    if cfg['link_depth'] > 0 and selected:
+        results = crawl(watch, selected, cfg, keep_links=True)
+        scraped = len(results)
+        done, listed = {r['url'] for r in results}, {r['url'] for r in rows}
+        for result in results:
+            if result['error']:
+                errors.append({'url': result['url'], 'error': result['error']})
+            for child in result.get('links', []):
+                if child in listed:
+                    continue
+                listed.add(child)
+                # Deeper links follow the plain rules: the 'always scrape' regex only applies to the watch's own page
+                kind, reason = links.decide(child, base, cfg['same_domain_only'], include, exclude, None)
+                if kind == 'scrape' and child not in done:
+                    kind, reason = 'skip', f"over the max links limit ({cfg['max_links']})"
+                rows.append({'url': child, 'kind': kind, 'reason': reason, 'depth': result['depth'] + 1,
+                             'parent': result['url']})
+
+    return {'watch_url': base, 'fetched_with': backend, 'link_source': cfg['link_source'], 'depth': cfg['link_depth'],
+            'max_links': cfg['max_links'], 'page_link_count': len(page_links), 'pages_scraped': scraped, 'rows': rows,
+            'errors': errors}
+
+
+def run_preview(watch, datastore, values, url):
+    """'Activate preview': one linked page scraped with the unsaved filters in `values`, before and after them."""
+    cfg, error = _cfg_from_form(datastore, values)
+    if error:
+        return {'error': error}
+    result = scraper.scrape(url, cfg, want_links=False, preview=True)
+    return {'url': url, 'method': cfg['scrape_method'], 'status_code': result['status_code'], 'error': result['error'],
+            'after': result['text'], 'before': result.get('unfiltered', ''), 'truncated': result['truncated'],
+            'include_filters': cfg['include_filter_list'], 'remove': cfg['subtractive_selector_list']}
 
 
 # --- output -------------------------------------------------------------------------------------

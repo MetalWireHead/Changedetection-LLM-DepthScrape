@@ -121,22 +121,30 @@ def current_links(link_source, base_url, new_text, new_html):
     return _unique(found)
 
 
-def filter_links(urls, watch_url, same_domain_only=True, include_regex='', exclude_regex='', limit=10):
-    include = compile_regex(include_regex)
-    exclude = compile_regex(exclude_regex)
+def decide(url, watch_url, same_domain_only=True, include=None, exclude=None, always=None):
+    """What happens to a link: ('always' | 'scrape' | 'skip', reason). The regexes are compiled (or None).
+
+    The one place these rules live, so real runs and the 'Test link rules' button cannot disagree. 'never follow'
+    wins over everything; 'always' is its own selector and is not limited by 'only follow'.
+    """
+    if url == normalise(watch_url):
+        return 'skip', 'this is the watch itself'
+    if exclude and exclude.search(url):
+        return 'skip', 'matches "never follow"'
     watch_host = _host(watch_url)
-    watch_url_normalised = normalise(watch_url)
-    kept = []
-    for url in urls:
-        if url == watch_url_normalised:
-            continue
-        if same_domain_only and watch_host and _host(url) != watch_host:
-            continue
-        if include and not include.search(url):
-            continue
-        if exclude and exclude.search(url):
-            continue
-        kept.append(url)
+    if same_domain_only and watch_host and _host(url) != watch_host:
+        return 'skip', 'another domain (same-domain rule)'
+    if always and always.search(url):
+        return 'always', ''
+    if include and not include.search(url):
+        return 'skip', 'does not match "only follow"'
+    return 'scrape', ''
+
+
+def filter_links(urls, watch_url, same_domain_only=True, include_regex='', exclude_regex='', limit=10):
+    """The links that pass the same-domain, 'only follow' and 'never follow' rules, at most `limit`."""
+    include, exclude = compile_regex(include_regex), compile_regex(exclude_regex)
+    kept = [u for u in urls if decide(u, watch_url, same_domain_only, include, exclude)[0] == 'scrape']
     return kept[:limit]
 
 
